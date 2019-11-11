@@ -1,0 +1,40 @@
+cabal-version: 2.2
+
+name: pipes-ghc-events
+version: 0.1.0.0
+synopsis: Compositional pipelines for parsing .eventlog files
+-- description:
+-- bug-reports:
+license: BSD-3-Clause
+license-file: LICENSE
+author: Thomas Tuegel
+maintainer: ttuegel@mailbox.org
+copyright: (c) 2019 Thomas Tuegel
+category: Development, GHC, Debug, Profiling, Trace, Pipes
+build-type: Simple
+extra-source-files: CHANGELOG.md
+
+common def
+  default-extensions:
+    LambdaCase
+    NamedFieldPuns
+    RankNTypes
+    ScopedTypeVariables
+  default-language: Haskell2010
+  build-depends:
+    base >=4.12 && <5,
+    ghc-events ==0.11.*,
+
+executable ghc-events-pipes
+  import: def
+  main-is: ghc-events-pipes.hs
+  build-depends:
+    bytestring,
+    pipes ==4.3.*,
+    pipes-bytestring ==2.1.*,
+    pipes-parse ==3.0.*,
+    transformers,
+
+executable ghc-events-count
+  import: def
+  main-is: ghc-events-count.hs
