@@ -16,6 +16,7 @@ extra-source-files: CHANGELOG.md
 
 common def
   default-extensions:
+    BlockArguments
     LambdaCase
     NamedFieldPuns
     RankNTypes
@@ -30,6 +31,7 @@ executable ghc-events-pipes
   main-is: ghc-events-pipes.hs
   build-depends:
     bytestring,
+    containers ==0.6.*,
     pipes ==4.3.*,
     pipes-bytestring ==2.1.*,
     pipes-parse ==3.0.*,

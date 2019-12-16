@@ -1,6 +1,8 @@
 module Main (main) where
 
 import Data.ByteString (ByteString)
+import Data.IntMap (IntMap)
+import Pipes (Consumer)
 import Pipes (Pipe)
 import Pipes (Producer)
 import Pipes.Parse (Parser)
@@ -12,6 +14,7 @@ import Pipes ((>->))
 
 import qualified Control.Monad.Trans.Class as Trans
 import qualified Data.ByteString as ByteString
+import qualified Data.IntMap as IntMap
 import qualified GHC.RTS.Events as GHC
 import qualified GHC.RTS.Events.Incremental as GHC
 import qualified Pipes as Pipes
@@ -25,8 +28,22 @@ main :: IO ()
 main =
   System.getArgs >>= \[filename] ->
   System.withFile filename System.ReadMode $ \filehndl ->
-  countEvents (decodeEventLog $ Pipes.ByteString.fromHandle filehndl) >>= \count ->
-  print count
+  do
+    let producer = Pipes.ByteString.fromHandle filehndl
+    (header, producer') <- decodeHeader producer
+    let
+      eventTypes = GHC.eventTypes header
+      eventTypesMapElem eventType =
+        ((fromIntegral . GHC.num) eventType, eventType)
+      eventTypesMap = IntMap.fromList (eventTypesMapElem <$> eventTypes)
+      pipe = producer' >-> decodeEvents header >-> prettyEvents eventTypesMap
+    Pipes.runEffect pipe
+
+prettyEvents :: IntMap GHC.EventType -> Consumer Event IO ()
+prettyEvents eventTypeMap =
+  Pipes.mapM_ \event ->
+  do
+    putStrLn $ GHC.ppEvent eventTypeMap event
 
 countEvents :: Monad m => Producer a m () -> m Int
 countEvents = Pipes.length
