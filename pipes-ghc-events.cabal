@@ -23,8 +23,8 @@ common def
     ScopedTypeVariables
   default-language: Haskell2010
   build-depends:
-    base >=4.12 && <5,
-    ghc-events ==0.11.*,
+    base ^>= 4.12,
+    ghc-events ^>= 0.13,
 
 executable ghc-events-pipes
   import: def
