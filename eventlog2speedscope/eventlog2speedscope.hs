@@ -5,25 +5,23 @@ import Control.Monad.State.Strict (MonadState)
 import Control.Monad.State.Strict (StateT)
 import Data.Aeson (ToJSON)
 import Data.ByteString (ByteString)
-import Data.Hashable (Hashable)
-import Data.HashMap.Strict (HashMap)
 import Data.IntMap (IntMap)
 import Data.IORef (IORef)
-import Data.Map.Strict (Map)
 import Data.Text (Text)
 import Database.SQLite.Simple (Connection)
 import Database.SQLite.Simple (ToRow)
 import Database.SQLite.Simple (FromRow)
-import Database.SQLite.Simple.FromField (FromField)
 import Database.SQLite.Simple.ToField (ToField)
 import Pipes (Consumer)
 import Pipes (MonadIO)
-import Pipes (Pipe)
 import Pipes (Producer)
 import Pipes.Safe (MonadSafe)
 import GHC.Generics (Generic)
 import GHC.RTS.Events (Event)
 import GHC.Stack (HasCallStack)
+import Speedscope.FrameDict (FrameId (..))
+import Speedscope.FrameDict (FrameName (..))
+import Speedscope.FrameDict (FrameDict)
 
 import Control.Applicative ((<|>))
 import Control.Lens ((.=))
@@ -44,13 +42,10 @@ import qualified Control.Monad.State.Strict as State
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as ByteString.Char8
 import qualified Data.Foldable as Foldable
-import qualified Data.HashMap.Strict as HashMap
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
-import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import qualified Database.SQLite.Simple as SQLite
-import qualified Database.SQLite.Simple.FromField as SQLite
 import qualified Database.SQLite.Simple.ToField as SQLite
 import qualified GHC.RTS.Events as GHC
 import qualified Options.Applicative as Options
@@ -60,6 +55,7 @@ import qualified Pipes.ByteString
 import qualified Pipes.Prelude as Pipes
 import qualified Pipes.Safe as Pipes
 import qualified Pipes.SQLite
+import qualified Speedscope.FrameDict as FrameDict
 import qualified System.IO as System
 
 main :: IO ()
@@ -76,9 +72,9 @@ main =
       do
         createTables conn
         (frames, endTime) <-
-          analyzeEventLog producer >-> exportThreadEvents conn
+          analyzeEventLog producer >-> consumeThreadEvents conn
           & Pipes.runEffect
-        (exportProfile conn frames endTime >-> Pipes.ByteString.stdout)
+        (produceProfile conn frames endTime >-> Pipes.ByteString.stdout)
           & Pipes.runEffect
           & Pipes.runSafeT
         pure ()
@@ -112,59 +108,6 @@ createTables conn =
     "CREATE TABLE IF NOT EXISTS\
     \ events (at INTEGER, thread INTEGER, type TEXT, frame INTEGER)"
 
-
-newtype FrameName = FrameName { unFrameName :: Text }
-  deriving (Eq, Ord, Show)
-  deriving (Generic)
-
-instance Hashable FrameName
-
-instance ToJSON FrameName where
-  toJSON FrameName { unFrameName } =
-    Aeson.object [ "name" Aeson..= unFrameName ]
-
-newtype FrameId = FrameId { unFrameId :: Int }
-  deriving (Eq, Ord, Show)
-  deriving (Generic)
-
-instance ToField FrameId where
-  toField = SQLite.toField . unFrameId
-
-instance FromField FrameId where
-  fromField = \x -> FrameId <$> SQLite.fromField x
-
-instance ToJSON FrameId where
-  toJSON = Aeson.toJSON . unFrameId
-
-data Frames =
-  Frames
-  { frameNames :: !(Map FrameId FrameName)
-  , frameIds :: !(HashMap FrameName FrameId)
-  , size :: !Int
-  }
-
-emptyFrames :: Frames
-emptyFrames =
-  Frames
-  { frameNames = Map.empty
-  , frameIds = HashMap.empty
-  , size = 0
-  }
-
-insertFrameName :: FrameName -> Frames -> (FrameId, Frames)
-insertFrameName frameName frames =
-  case HashMap.lookup frameName (frameIds frames) of
-    Just frameId -> (frameId, frames)
-    Nothing ->
-      let
-        frameId = FrameId (size frames)
-        frames' =
-          Frames
-          { frameNames = Map.insert frameId frameName (frameNames frames)
-          , frameIds = HashMap.insert frameName frameId (frameIds frames)
-          , size = unFrameId frameId + 1
-          }
-      in (frameId, frames')
 
 data FrameEventType = Open | Close
   deriving (Eq, Ord, Show)
@@ -213,8 +156,7 @@ instance ToRow FrameEvent where
     , SQLite.toField eventFrameId
     ]
 
-data ThreadEventType
-  = ThreadFrameEvent !(FrameEventType, FrameId)
+data ThreadEventType = ThreadFrameEvent !(FrameEventType, FrameId)
   deriving (Eq, Ord, Show)
 
 data ThreadEvent =
@@ -238,7 +180,7 @@ instance FromRow ThreadEvent where
 
 data ProcessAnalysis =
   ProcessAnalysis
-  { frames :: !Frames
+  { frames :: !FrameDict
   , caps :: !(IntMap GHC.ThreadId)
   , endTime :: !GHC.Timestamp
   }
@@ -247,7 +189,7 @@ data ProcessAnalysis =
 emptyProcessAnalysis :: ProcessAnalysis
 emptyProcessAnalysis =
   ProcessAnalysis
-  { frames = emptyFrames
+  { frames = FrameDict.empty
   , caps = IntMap.empty
   , endTime = 0
   }
@@ -263,7 +205,7 @@ refStateT ioRef act =
 analyzeEventLog
   :: MonadIO m
   => Producer Event m x
-  -> Producer ThreadEvent m (Frames, GHC.Timestamp)
+  -> Producer ThreadEvent m (FrameDict, GHC.Timestamp)
 analyzeEventLog producer =
   do
     ref <- newIORef emptyProcessAnalysis & Pipes.liftIO
@@ -301,8 +243,8 @@ updateCaps event =
 decodeMessage :: Text -> Maybe (FrameEventType, FrameName)
 decodeMessage txt = openFrame <|> closeFrame
   where
-    openFrame = (,) Open . FrameName <$> Text.stripPrefix "START " txt
-    closeFrame = (,) Close . FrameName <$> Text.stripPrefix "STOP " txt
+    openFrame = (,) Open . FrameName <$> Text.stripPrefix "O" txt
+    closeFrame = (,) Close . FrameName <$> Text.stripPrefix "C" txt
 
 expectThreadId
   :: HasCallStack
@@ -316,8 +258,8 @@ expectThreadId event =
       Just threadId -> pure threadId
       Nothing -> error "expected thread"
 
-getFrameId :: MonadState Frames m => FrameName -> m FrameId
-getFrameId frameName = State.state (insertFrameName frameName)
+getFrameId :: MonadState FrameDict m => FrameName -> m FrameId
+getFrameId frameName = State.state (FrameDict.insert frameName)
 
 processThreadFrameEvent
   :: MonadIO m
@@ -345,17 +287,17 @@ processThreadFrameEvent event =
               }
     _ -> pure ()
 
-exportThreadEvents :: MonadIO m => Connection -> Consumer ThreadEvent m x
-exportThreadEvents conn =
+consumeThreadEvents :: MonadIO m => Connection -> Consumer ThreadEvent m x
+consumeThreadEvents conn =
   Pipes.SQLite.execute conn
   "INSERT INTO events (thread, at, type, frame) VALUES (?, ?, ?, ?)"
 
-importThreadEvents
+produceThreadEvents
   :: MonadSafe m
   => Connection
   -> GHC.ThreadId
   -> Producer ThreadEvent m ()
-importThreadEvents conn threadId =
+produceThreadEvents conn threadId =
   Pipes.SQLite.query conn
     "SELECT thread, at, type, frame FROM events\
     \ WHERE thread = ? ORDER BY at ASC"
@@ -396,7 +338,7 @@ analyzeThread
 analyzeThread conn threadId =
   do
     ref <- newIORef emptyThreadAnalysis & Pipes.liftIO
-    Pipes.for (importThreadEvents conn threadId)
+    Pipes.for (produceThreadEvents conn threadId)
       (\event -> processThreadEvent event & Pipes.hoist (refStateT ref))
     pure ()
 
@@ -412,24 +354,8 @@ threadFrame
   -> Producer FrameEvent m ()
 threadFrame frameEvent@FrameEvent { eventType, eventFrameId } =
   do
-    isRecursive <-
-      case eventType of
-        Open ->
-          do
-            isRecursive <- (==) (Just eventFrameId) <$> peekThread
-            pushThread eventFrameId
-            pure isRecursive
-        Close ->
-          do
-            popThread eventFrameId
-            (==) (Just eventFrameId) <$> peekThread
-    Monad.unless isRecursive (Pipes.yield frameEvent)
-
-peekThread :: MonadState ThreadAnalysis m => m (Maybe FrameId)
-peekThread =
-  Lens.use (field @"stack") >>= \case
-    [] -> pure Nothing
-    frameId : _ -> pure (Just frameId)
+    case eventType of { Open -> pushThread; Close -> popThread } eventFrameId
+    Pipes.yield frameEvent
 
 pushThread :: MonadState ThreadAnalysis m => FrameId -> m ()
 pushThread frameId = field @"stack" %= (:) frameId
@@ -455,16 +381,13 @@ popThread frameId =
           , show frameId'
           ]
 
-exportFrameEvents :: Functor m => Pipe FrameEvent Aeson.Value m r
-exportFrameEvents = Pipes.map Aeson.toJSON
-
-array :: MonadIO m => Producer Aeson.Value m r -> Producer ByteString m r
+array :: (ToJSON a, MonadIO m) => Producer a m r -> Producer ByteString m r
 array producer =
   do
     Pipes.yield "["
     r <-
       Pipes.for
-        (intersperse Nothing (producer >-> Pipes.map Just))
+        (intersperse Nothing (producer >-> Pipes.map (Just . Aeson.toJSON)))
         (maybe comma Pipes.Aeson.encode)
     Pipes.yield "]"
     pure r
@@ -500,27 +423,26 @@ intersperse a producer =
 schema :: Text
 schema = "https://www.speedscope.app/file-format-schema.json"
 
-exportFrames :: Functor m => Frames -> Producer Aeson.Value m ()
-exportFrames Frames { frameNames } =
-  Pipes.each frameNames >-> Pipes.map Aeson.toJSON
+produceFrames :: Functor m => FrameDict -> Producer FrameName m ()
+produceFrames frameDict = Pipes.each (FrameDict.toList frameDict)
 
 comma :: Functor m => Producer ByteString m ()
 comma = Pipes.yield ","
 
-exportProfile
+produceProfile
   :: (MonadFail m, MonadSafe m)
   => Connection
-  -> Frames
+  -> FrameDict
   -> GHC.Timestamp
   -> Producer ByteString m ()
-exportProfile conn frames endTime =
+produceProfile conn frames endTime =
   do
     Pipes.yield "{"
     pair "$schema" schema
     comma
     Pipes.yield "\"shared\":{"
     Pipes.yield "\"frames\":"
-    array (exportFrames frames)
+    array (produceFrames frames >-> Pipes.map Aeson.toJSON)
     Pipes.yield "}"
     comma
     Pipes.yield "\"profiles\":["
@@ -547,7 +469,7 @@ exportProfile conn frames endTime =
             pair "endValue" (endTime :: GHC.Timestamp)
             comma
             Pipes.yield "\"events\":"
-            array (analyzeThread conn thread >-> exportFrameEvents)
+            array (analyzeThread conn thread >-> Pipes.map Aeson.toJSON)
             Pipes.yield "}"
 
     Pipes.yield "]}"
