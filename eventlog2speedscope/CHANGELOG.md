@@ -1,4 +1,4 @@
-# Revision history for ghc-events-pipes
+# Revision history for eventlog2speedscope
 
 ## 0.1.0.0 -- YYYY-mm-dd
 

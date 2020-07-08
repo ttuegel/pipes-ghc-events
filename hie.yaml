@@ -1,1 +1,5 @@
-cradle: { cabal: { component: "exe:ghc-events-pipes" } }
+cradle:
+  cabal:
+    - { path: "./eventlog2speedscope", component: "eventlog2speedscope" }
+    - { path: "./pipes-ghc-events", component: "pipes-ghc-events" }
+    - { path: "./pipes-simple-sqlite", component: "pipes-simple-sqlite" }

@@ -1,52 +1,22 @@
-module Main (main) where
+module Pipes.GHC.RTS.Events
+  ( decodeEventLog
+  , decodeHeader
+  , decodeEvents
+  ) where
 
 import Data.ByteString (ByteString)
-import Data.IntMap (IntMap)
-import Pipes (Consumer)
 import Pipes (Pipe)
 import Pipes (Producer)
-import Pipes.Parse (Parser)
 import GHC.RTS.Events (Event)
 
 import Control.Monad.Trans.State.Strict (runStateT)
-import Control.Monad.Trans.State.Strict (evalStateT)
 import Pipes ((>->))
 
 import qualified Control.Monad.Trans.Class as Trans
-import qualified Data.ByteString as ByteString
-import qualified Data.IntMap as IntMap
 import qualified GHC.RTS.Events as GHC
 import qualified GHC.RTS.Events.Incremental as GHC
 import qualified Pipes as Pipes
-import qualified Pipes.ByteString
 import qualified Pipes.Parse as Pipes
-import qualified Pipes.Prelude as Pipes
-import qualified System.Environment as System
-import qualified System.IO as System
-
-main :: IO ()
-main =
-  System.getArgs >>= \[filename] ->
-  System.withFile filename System.ReadMode $ \filehndl ->
-  do
-    let producer = Pipes.ByteString.fromHandle filehndl
-    (header, producer') <- decodeHeader producer
-    let
-      eventTypes = GHC.eventTypes header
-      eventTypesMapElem eventType =
-        ((fromIntegral . GHC.num) eventType, eventType)
-      eventTypesMap = IntMap.fromList (eventTypesMapElem <$> eventTypes)
-      pipe = producer' >-> decodeEvents header >-> prettyEvents eventTypesMap
-    Pipes.runEffect pipe
-
-prettyEvents :: IntMap GHC.EventType -> Consumer Event IO ()
-prettyEvents eventTypeMap =
-  Pipes.mapM_ \event ->
-  do
-    putStrLn $ GHC.ppEvent eventTypeMap event
-
-countEvents :: Monad m => Producer a m () -> m Int
-countEvents = Pipes.length
 
 decodeHeader
   :: Monad m
@@ -73,6 +43,7 @@ decodeEvents :: forall m r. Monad m => GHC.Header -> Pipe ByteString Event m r
 decodeEvents header = begin []
   where
     begin = go (GHC.decodeEvents header)
+
     go :: GHC.Decoder Event -> [ByteString] -> Pipe ByteString Event m r
     go decoder leftovers =
       case decoder of
