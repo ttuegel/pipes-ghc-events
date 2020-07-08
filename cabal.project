@@ -1,0 +1,3 @@
+packages:
+  ./.
+  pipes-sqlite-simple
