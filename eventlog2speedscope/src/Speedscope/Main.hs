@@ -11,6 +11,7 @@ import Data.Aeson (ToJSON)
 import Data.ByteString (ByteString)
 import Data.IntMap (IntMap)
 import Data.IORef (IORef)
+import Data.Set (Set)
 import Data.Text (Text)
 import Database.SQLite.Simple (Connection)
 import Database.SQLite.Simple (ToRow)
@@ -31,6 +32,7 @@ import Control.Applicative ((<|>))
 import Control.Lens ((.=))
 import Control.Lens ((%=))
 import Control.Lens (at)
+import Control.Monad (guard)
 import Control.Monad.State.Strict (runStateT)
 import Data.Function ((&))
 import Data.Generics.Product (field)
@@ -48,6 +50,7 @@ import qualified Data.ByteString.Char8 as ByteString.Char8
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite.Simple.ToField as SQLite
@@ -63,14 +66,15 @@ import qualified Speedscope.FrameDict as FrameDict
 import qualified System.IO as System
 
 main :: Options -> IO ()
-main Options { filename } =
+main Options { filename, matching, notMatching } =
   withEventLog filename \producer -> withDatabase \conn ->
     do
       createTables conn
       (frames, endTime) <-
         analyzeEventLog producer >-> consumeThreadEvents conn
         & Pipes.runEffect
-      (produceProfile conn frames endTime >-> Pipes.ByteString.stdout)
+      let frameFilter = mkFrameFilter frames matching notMatching
+      (produceProfile conn frames frameFilter endTime >-> Pipes.ByteString.stdout)
         & Pipes.runEffect
         & Pipes.runSafeT
       pure ()
@@ -78,6 +82,8 @@ main Options { filename } =
 data Options =
   Options
   { filename :: !FilePath
+  , matching :: ![Text]
+  , notMatching :: ![Text]
   }
 
 parseOptions :: Options.Parser Options
@@ -87,6 +93,23 @@ parseOptions =
     (mconcat
       [ Options.metavar "FILENAME"
       , Options.help "eventlog file"
+      ]
+    )
+  <*> (Options.many . Options.strOption)
+    (mconcat
+      [ Options.metavar "STRING"
+      , Options.long "matching"
+      , Options.help
+          "only emit events where STRING occurs as a substring of the name"
+      ]
+    )
+  <*> (Options.many . Options.strOption)
+    (mconcat
+      [ Options.metavar "STRING"
+      , Options.long "not-matching"
+      , Options.help
+          "only emit events where STRING does not occur\
+          \ as a substring of the name"
       ]
     )
 
@@ -104,6 +127,22 @@ createTables conn =
     "CREATE TABLE IF NOT EXISTS\
     \ events (at INTEGER, thread INTEGER, type TEXT, frame INTEGER)"
 
+newtype FrameFilter = FrameFilter (Set FrameId)
+
+mkFrameFilter :: FrameDict -> [Text] -> [Text] -> FrameFilter
+mkFrameFilter frameDict matching notMatching =
+  FrameFilter $ Set.fromList
+    do
+      (ix, frameName) <- zip [0..] (FrameDict.toList frameDict)
+      guard (null matching || any (match frameName) matching)
+      guard (not $ any (match frameName) notMatching)
+      pure (FrameId ix)
+  where
+    match frameName substr = Text.isInfixOf substr (unFrameName frameName)
+
+applyFrameFilter :: FrameFilter -> FrameId -> Bool
+applyFrameFilter (FrameFilter frameIds) frameId =
+  Set.member frameId frameIds
 
 data FrameEventType = Open | Close
   deriving (Eq, Ord, Show)
@@ -429,9 +468,10 @@ produceProfile
   :: (MonadFail m, MonadSafe m)
   => Connection
   -> FrameDict
+  -> FrameFilter
   -> GHC.Timestamp
   -> Producer ByteString m ()
-produceProfile conn frames endTime =
+produceProfile conn frames frameFilter endTime =
   do
     Pipes.yield "{"
     pair "$schema" schema
@@ -465,7 +505,11 @@ produceProfile conn frames endTime =
             pair "endValue" (endTime :: GHC.Timestamp)
             comma
             Pipes.yield "\"events\":"
-            array (analyzeThread conn thread >-> Pipes.map Aeson.toJSON)
+            array
+              (analyzeThread conn thread
+                >-> Pipes.filter (applyFrameFilter frameFilter . eventFrameId)
+                >-> Pipes.map Aeson.toJSON
+              )
             Pipes.yield "}"
 
     Pipes.yield "]}"
