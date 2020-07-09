@@ -75,3 +75,4 @@ executable eventlog2speedscope
   main-is: eventlog2speedscope.hs
   build-depends:
     eventlog2speedscope,
+    optparse-applicative ^>= 0.15,

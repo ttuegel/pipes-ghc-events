@@ -1,4 +1,8 @@
-module Speedscope.Main (main) where
+module Speedscope.Main
+  ( main
+  , Options (..)
+  , parseOptions
+  ) where
 
 import Control.Monad.Fail (MonadFail)
 import Control.Monad.State.Strict (MonadState)
@@ -58,26 +62,18 @@ import qualified Pipes.SQLite
 import qualified Speedscope.FrameDict as FrameDict
 import qualified System.IO as System
 
-main :: IO ()
-main =
-  do
-    let
-      info =
-        Options.info
-          (parseOptions Options.<**> Options.helper)
-          (Options.fullDesc)
-    options <- Options.execParser info
-    let Options { filename } = options
-    withEventLog filename \producer -> withDatabase \conn ->
-      do
-        createTables conn
-        (frames, endTime) <-
-          analyzeEventLog producer >-> consumeThreadEvents conn
-          & Pipes.runEffect
-        (produceProfile conn frames endTime >-> Pipes.ByteString.stdout)
-          & Pipes.runEffect
-          & Pipes.runSafeT
-        pure ()
+main :: Options -> IO ()
+main Options { filename } =
+  withEventLog filename \producer -> withDatabase \conn ->
+    do
+      createTables conn
+      (frames, endTime) <-
+        analyzeEventLog producer >-> consumeThreadEvents conn
+        & Pipes.runEffect
+      (produceProfile conn frames endTime >-> Pipes.ByteString.stdout)
+        & Pipes.runEffect
+        & Pipes.runSafeT
+      pure ()
 
 data Options =
   Options
