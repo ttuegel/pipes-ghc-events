@@ -1,3 +1,3 @@
 [submodule "pipes-sqlite-simple"]
 	path = pipes-sqlite-simple
-	url = git@github.com:ttuegel/pipes-sqlite-simple.git
+	url = https://github.com/ttuegel/pipes-sqlite-simple.git
