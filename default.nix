@@ -9,24 +9,24 @@ let
       args = nixpkgsArgs // {
         overlays =
           (nixpkgsArgs.overlays or [])
-          ++ [ (import ./nix/ghcide.nix { inherit sources; }) ]
           ;
         config =
           (nixpkgsArgs.config or {})
           ;
       };
-    in import haskell-nix.sources.nixpkgs-1909 args;
+    in import haskell-nix.sources.nixpkgs-2003 args;
   pkgs = nixpkgs;
   project =
-    pkgs.haskell-nix.project {
+    pkgs.haskell-nix.cabalProject {
       src = pkgs.haskell-nix.haskellLib.cleanGit { name = "pipes-ghc-events"; src = ./.; };
+      compiler-nix-name = "ghc8101";
     };
   shell = import ./shell.nix { inherit default; };
   default =
     {
       inherit pkgs project;
       cache = [
-        pkgs.haskell-nix.haskellNixRoots
+        project.roots
         (pkgs.haskell-nix.withInputs shell)
       ];
     };

@@ -17,11 +17,24 @@
         "homepage": "https://input-output-hk.github.io/haskell.nix",
         "owner": "input-output-hk",
         "repo": "haskell.nix",
-        "rev": "4dbc429b81c78c637c95c040693ce5fe0d640c28",
-        "sha256": "1lhn0cwwjrvh5cxwx288927kgjh0ilgpqf2cdqazp5g95iwp5plv",
+        "rev": "34f366a25d711bb2257065dff10e4cd935ac0c8c",
+        "sha256": "1a6l7lgrc2zhm1qn1zh9v4n320mkin8z76fqgvlk2cz6ihsr3bf1",
         "type": "tarball",
-        "url": "https://github.com/input-output-hk/haskell.nix/archive/4dbc429b81c78c637c95c040693ce5fe0d640c28.tar.gz",
+        "url": "https://github.com/input-output-hk/haskell.nix/archive/34f366a25d711bb2257065dff10e4cd935ac0c8c.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    },
+    "hlint": {
+        "branch": "master",
+        "description": "Haskell source code suggestions",
+        "homepage": null,
+        "owner": "ndmitchell",
+        "repo": "hlint",
+        "rev": "5af9c9f7853744bbf90603c2c1d0ebda381a4122",
+        "sha256": "1awbbxk0ryggkx7v374zg28kx80nzvl6pwpb7iyx85dy28rr6836",
+        "type": "tarball",
+        "url": "https://github.com/ndmitchell/hlint/archive/5af9c9f7853744bbf90603c2c1d0ebda381a4122.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz",
+        "version": "v3.1.6"
     },
     "niv": {
         "branch": "master",
