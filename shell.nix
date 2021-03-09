@@ -1,7 +1,7 @@
 { default ? import ./default.nix {} }:
 
 let
-  inherit (default) project pkgs;
+  inherit (default) project pkgs compiler-nix-name;
   inherit (pkgs) cabal-install;
 
   local =
@@ -12,26 +12,21 @@ let
 
   sources = import ./nix/sources.nix;
 
-  ghcide-project = default.pkgs.haskell-nix.project {
-    src = sources."ghcide";
-    projectFileName = "stack810.yaml";
-    modules = [
-      # This fixes a performance issue, probably https://gitlab.haskell.org/ghc/ghc/issues/15524
-      { packages.ghcide.configureFlags = [ "--enable-executable-dynamic" ]; }
-    ];
+  hls-project = import sources."nix-haskell-hls" {
+    ghcVersion = compiler-nix-name;
   };
-  inherit (ghcide-project.ghcide.components.exes) ghcide;
-  inherit (ghcide-project.hie-bios.components.exes) hie-bios;
+  inherit (hls-project) hls-renamed;
 
-  hlint-project = default.pkgs.haskell-nix.stackProject {
+  hlint-project = default.pkgs.haskell-nix.cabalProject {
     src = sources."hlint";
+    inherit (default) compiler-nix-name index-state;
   };
   inherit (hlint-project.hlint.components.exes) hlint;
+
 in
 
 shellFor {
   buildInputs = with pkgs; [
-    cabal-install ghcid hlint
-    ghcide hie-bios
+    cabal-install hlint hls-renamed
   ];
 }

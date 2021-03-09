@@ -1,26 +1,14 @@
 {
-    "ghcide": {
-        "branch": "master",
-        "description": "A library for building Haskell IDE tooling",
-        "homepage": "",
-        "owner": "digital-asset",
-        "repo": "ghcide",
-        "rev": "7dc6e2678a58d4822903fda8172329dd252b3629",
-        "sha256": "0v16kj0xp6fb1j8nj69166hj6ms96n7ryjvf5cy6drrg8srb1py7",
-        "type": "tarball",
-        "url": "https://github.com/digital-asset/ghcide/archive/7dc6e2678a58d4822903fda8172329dd252b3629.tar.gz",
-        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
-    },
     "haskell.nix": {
         "branch": "master",
         "description": "Alternative Haskell Infrastructure for Nixpkgs",
         "homepage": "https://input-output-hk.github.io/haskell.nix",
         "owner": "input-output-hk",
         "repo": "haskell.nix",
-        "rev": "34f366a25d711bb2257065dff10e4cd935ac0c8c",
-        "sha256": "1a6l7lgrc2zhm1qn1zh9v4n320mkin8z76fqgvlk2cz6ihsr3bf1",
+        "rev": "27fb405a31ce93aa957147d341bbff3cf670dd9d",
+        "sha256": "0naxz6qh7539nrivqr46xsb8nn84m7kpcrp03wabwv9m0zv068i1",
         "type": "tarball",
-        "url": "https://github.com/input-output-hk/haskell.nix/archive/34f366a25d711bb2257065dff10e4cd935ac0c8c.tar.gz",
+        "url": "https://github.com/input-output-hk/haskell.nix/archive/27fb405a31ce93aa957147d341bbff3cf670dd9d.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     },
     "hlint": {
@@ -29,10 +17,10 @@
         "homepage": null,
         "owner": "ndmitchell",
         "repo": "hlint",
-        "rev": "5af9c9f7853744bbf90603c2c1d0ebda381a4122",
-        "sha256": "1awbbxk0ryggkx7v374zg28kx80nzvl6pwpb7iyx85dy28rr6836",
+        "rev": "5ce4244471168c9467779c11e38f101a7125a874",
+        "sha256": "01fcm0hm029nj0bz54z7wjz087l53fh9rsll9k5q2qdqd6jmsjkn",
         "type": "tarball",
-        "url": "https://github.com/ndmitchell/hlint/archive/5af9c9f7853744bbf90603c2c1d0ebda381a4122.tar.gz",
+        "url": "https://github.com/ndmitchell/hlint/archive/5ce4244471168c9467779c11e38f101a7125a874.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz",
         "version": "v3.1.6"
     },
@@ -46,6 +34,18 @@
         "sha256": "1g2z8mq4lid1vy61rhyib9z2xhy096z28jbjxpx6xf3cf0kvjjc1",
         "type": "tarball",
         "url": "https://github.com/nmattia/niv/archive/dd17834c49aa765c222d77b6d22f8de7af03a3c1.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    },
+    "nix-haskell-hls": {
+        "branch": "master",
+        "description": "Nix builds of Haskell Language Server",
+        "homepage": null,
+        "owner": "shajra",
+        "repo": "nix-haskell-hls",
+        "rev": "7f5dad7d3569467cd7f41429566e59f0cbf1dc40",
+        "sha256": "02fb8x5g7kc8rklb6d937xglrhkj5y6f0vlvpzalqhhfcyxp1l3q",
+        "type": "tarball",
+        "url": "https://github.com/shajra/nix-haskell-hls/archive/7f5dad7d3569467cd7f41429566e59f0cbf1dc40.tar.gz",
         "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
     },
     "nixpkgs": {
