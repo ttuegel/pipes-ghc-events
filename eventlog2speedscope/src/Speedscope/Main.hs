@@ -4,7 +4,6 @@ module Speedscope.Main
   , parseOptions
   ) where
 
-import Control.Monad.Fail (MonadFail)
 import Control.Monad.State.Strict (MonadState)
 import Control.Monad.State.Strict (StateT)
 import Data.Aeson (ToJSON)
@@ -32,7 +31,6 @@ import Control.Applicative ((<|>))
 import Control.Lens ((.=))
 import Control.Lens ((%=))
 import Control.Lens (at)
-import Control.Monad (guard)
 import Control.Monad (when)
 import Control.Monad.State.Strict (runStateT)
 import Data.Function ((&))
@@ -51,7 +49,7 @@ import qualified Data.ByteString.Char8 as ByteString.Char8
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
-import qualified Data.Set as Set
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite.Simple.ToField as SQLite
@@ -138,31 +136,42 @@ createTables conn =
     "CREATE TABLE IF NOT EXISTS\
     \ events (at INTEGER, thread INTEGER, type TEXT, frame INTEGER)"
 
-newtype FrameFilter = FrameFilter (ThreadAnalysis -> (Set FrameId))
+data FrameFilter =
+  FrameFilter
+  { matchingIds :: Set FrameId
+  , notMatchingIds :: Set FrameId
+  , notMatchingChildrenIds :: Set FrameId
+  }
 
 mkFrameFilter :: FrameDict -> [Text] -> [Text] -> [Text] -> FrameFilter
 mkFrameFilter frameDict matching notMatching notMatchingChildren =
-  FrameFilter $ \ThreadAnalysis { stack } ->
-    Set.fromList $
-      do
-        (ix, frameName) <- framesWithIds
-        guard (null matching || any (match frameName) matching)
-        guard (not $ any (match frameName) notMatching)
-        guard (not $ any (`elem` notMatchingChildrenIds) stack)
-        pure (FrameId ix)
+  let matchingIds = mkFrameFilterComponent matching
+      notMatchingIds = mkFrameFilterComponent notMatching
+      notMatchingChildrenIds = mkFrameFilterComponent notMatchingChildren
+  in
+    FrameFilter
+    { matchingIds
+    , notMatchingIds
+    , notMatchingChildrenIds
+    }
   where
     match frameName substr = Text.isInfixOf substr (unFrameName frameName)
-    -- TODO: why doesn't this use the maps in FrameDict?
-    framesWithIds = zip [0..] (FrameDict.toList frameDict)
-    notMatchingChildrenIds = do
-      (id', frameName) <- framesWithIds
-      guard (any (match frameName) notMatchingChildren)
-      pure (FrameId id')
+    mkFrameFilterComponent toMatch =
+      let frameNames = FrameDict.frameNames frameDict
+          matchingCondition frameName =
+              any (match frameName) toMatch
+      in
+        Map.filter matchingCondition frameNames
+        & Map.keysSet
 
 applyFrameFilter :: FrameFilter -> ThreadAnalysis -> FrameId -> Bool
-applyFrameFilter (FrameFilter runFrameFilter) threadAnalysis frameId =
-  let frameIds = runFrameFilter threadAnalysis
-  in Set.member frameId frameIds
+applyFrameFilter frameFilter threadAnalysis frameId =
+  (null matchingIds || frameId `elem` matchingIds)
+  && frameId `notElem` notMatchingIds
+  && all (`notElem` notMatchingChildrenIds) stack
+  where
+    FrameFilter { matchingIds, notMatchingIds, notMatchingChildrenIds } = frameFilter
+    ThreadAnalysis { stack } = threadAnalysis
 
 data FrameEventType = Open | Close
   deriving (Eq, Ord, Show)
