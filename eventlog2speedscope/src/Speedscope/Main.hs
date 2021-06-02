@@ -138,9 +138,9 @@ createTables conn =
 
 data FrameFilter =
   FrameFilter
-  { matchingIds :: Set FrameId
-  , notMatchingIds :: Set FrameId
-  , notMatchingChildrenIds :: Set FrameId
+  { matchingIds :: !(Set FrameId)
+  , notMatchingIds :: !(Set FrameId)
+  , notMatchingChildrenIds :: !(Set FrameId)
   }
 
 mkFrameFilter :: FrameDict -> [Text] -> [Text] -> [Text] -> FrameFilter
