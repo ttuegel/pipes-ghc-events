@@ -164,14 +164,13 @@ mkFrameFilter frameDict matching notMatching notMatchingChildren =
         Map.filter matchingCondition frameNames
         & Map.keysSet
 
-applyFrameFilter :: FrameFilter -> ThreadAnalysis -> FrameId -> Bool
-applyFrameFilter frameFilter threadAnalysis frameId =
+applyFrameFilter :: FrameFilter -> [FrameId] -> FrameId -> Bool
+applyFrameFilter frameFilter stack frameId =
   (null matchingIds || frameId `elem` matchingIds)
   && frameId `notElem` notMatchingIds
   && all (`notElem` notMatchingChildrenIds) stack
   where
     FrameFilter { matchingIds, notMatchingIds, notMatchingChildrenIds } = frameFilter
-    ThreadAnalysis { stack } = threadAnalysis
 
 data FrameEventType = Open | Close
   deriving (Eq, Ord, Show)
@@ -381,9 +380,9 @@ countUserEvents conn threadId =
       & Pipes.liftIO
     pure r
 
-data ThreadAnalysis =
+newtype ThreadAnalysis =
   ThreadAnalysis
-  { stack :: ![FrameId]
+  { stack :: [FrameId]
   }
   deriving (Show)
   deriving (Generic)
@@ -421,10 +420,17 @@ threadFrame
   -> FrameEvent
   -> Producer FrameEvent m ()
 threadFrame frameFilter frameEvent@FrameEvent { eventType, eventFrameId } =
-  do
-    case eventType of { Open -> pushThread; Close -> popThread } eventFrameId
-    threadAnalysis <- State.get
-    when (applyFrameFilter frameFilter threadAnalysis eventFrameId) (Pipes.yield frameEvent)
+  case eventType of
+    Open -> do
+      pushThread eventFrameId
+      ThreadAnalysis { stack } <- State.get
+      when (applyFrameFilter frameFilter (tail stack) eventFrameId) $
+        Pipes.yield frameEvent
+    Close -> do
+      popThread eventFrameId
+      ThreadAnalysis { stack } <- State.get
+      when (applyFrameFilter frameFilter stack eventFrameId) $
+        Pipes.yield frameEvent
 
 pushThread :: MonadState ThreadAnalysis m => FrameId -> m ()
 pushThread frameId = field @"stack" %= (:) frameId
