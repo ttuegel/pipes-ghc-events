@@ -421,19 +421,27 @@ threadFrame
   -> Producer FrameEvent m ()
 threadFrame frameFilter frameEvent@FrameEvent { eventType, eventFrameId } =
   case eventType of
-    Open -> do
-      pushThread eventFrameId
-      ThreadAnalysis { stack } <- State.get
-      when (applyFrameFilter frameFilter (tail stack) eventFrameId) $
-        Pipes.yield frameEvent
-    Close -> do
-      popThread eventFrameId
-      ThreadAnalysis { stack } <- State.get
+    Open -> threadFrameWorker pushThreadAndExtractTail 
+    Close -> threadFrameWorker popThreadAndExtract 
+  where
+    threadFrameWorker action = do
+      stack <- action eventFrameId
       when (applyFrameFilter frameFilter stack eventFrameId) $
         Pipes.yield frameEvent
 
 pushThread :: MonadState ThreadAnalysis m => FrameId -> m ()
 pushThread frameId = field @"stack" %= (:) frameId
+
+pushThreadAndExtractTail
+  :: MonadState ThreadAnalysis m
+  => FrameId
+  -> m [FrameId]
+pushThreadAndExtractTail frameId = do
+  -- inspect stack before pushing to extract tail of
+  -- current stack
+  ThreadAnalysis { stack } <- State.get
+  pushThread frameId
+  return stack
 
 popThread :: HasCallStack => MonadState ThreadAnalysis m => FrameId -> m ()
 popThread frameId =
@@ -455,6 +463,15 @@ popThread frameId =
           , "but found"
           , show frameId'
           ]
+
+popThreadAndExtract
+  :: MonadState ThreadAnalysis m
+  => FrameId
+  -> m [FrameId]
+popThreadAndExtract frameId = do
+  popThread frameId
+  ThreadAnalysis { stack } <- State.get
+  return stack
 
 array :: (ToJSON a, MonadIO m) => Producer a m r -> Producer ByteString m r
 array producer =
