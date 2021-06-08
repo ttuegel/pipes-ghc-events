@@ -4,7 +4,6 @@ module Speedscope.Main
   , parseOptions
   ) where
 
-import Control.Monad.Fail (MonadFail)
 import Control.Monad.State.Strict (MonadState)
 import Control.Monad.State.Strict (StateT)
 import Data.Aeson (ToJSON)
@@ -32,7 +31,7 @@ import Control.Applicative ((<|>))
 import Control.Lens ((.=))
 import Control.Lens ((%=))
 import Control.Lens (at)
-import Control.Monad (guard)
+import Control.Monad (when)
 import Control.Monad.State.Strict (runStateT)
 import Data.Function ((&))
 import Data.Generics.Product (field)
@@ -50,7 +49,7 @@ import qualified Data.ByteString.Char8 as ByteString.Char8
 import qualified Data.Foldable as Foldable
 import qualified Data.IntMap as IntMap
 import qualified Data.List as List
-import qualified Data.Set as Set
+import qualified Data.Map.Strict as Map
 import qualified Data.Text as Text
 import qualified Database.SQLite.Simple as SQLite
 import qualified Database.SQLite.Simple.ToField as SQLite
@@ -66,14 +65,14 @@ import qualified Speedscope.FrameDict as FrameDict
 import qualified System.IO as System
 
 main :: Options -> IO ()
-main Options { filename, matching, notMatching } =
+main Options { filename, matching, notMatching, notMatchingChildren } =
   withEventLog filename \producer -> withDatabase \conn ->
     do
       createTables conn
       (frames, endTime) <-
         analyzeEventLog producer >-> consumeThreadEvents conn
         & Pipes.runEffect
-      let frameFilter = mkFrameFilter frames matching notMatching
+      let frameFilter = mkFrameFilter frames matching notMatching notMatchingChildren
       (produceProfile conn frames frameFilter endTime >-> Pipes.ByteString.stdout)
         & Pipes.runEffect
         & Pipes.runSafeT
@@ -84,6 +83,7 @@ data Options =
   { filename :: !FilePath
   , matching :: ![Text]
   , notMatching :: ![Text]
+  , notMatchingChildren :: ![Text]
   }
 
 parseOptions :: Options.Parser Options
@@ -112,6 +112,15 @@ parseOptions =
           \ as a substring of the name"
       ]
     )
+  <*> (Options.many . Options.strOption)
+    (mconcat
+      [ Options.metavar "STRING"
+      , Options.long "not-matching-children"
+      , Options.help
+          "only emit children of events where STRING\
+          \ does not occur as a substring of the name"
+      ]
+    )
 
 withEventLog :: FilePath -> (Producer GHC.Event IO () -> IO a) -> IO a
 withEventLog filename act =
@@ -127,22 +136,41 @@ createTables conn =
     "CREATE TABLE IF NOT EXISTS\
     \ events (at INTEGER, thread INTEGER, type TEXT, frame INTEGER)"
 
-newtype FrameFilter = FrameFilter (Set FrameId)
+data FrameFilter =
+  FrameFilter
+  { matchingIds :: !(Set FrameId)
+  , notMatchingIds :: !(Set FrameId)
+  , notMatchingChildrenIds :: !(Set FrameId)
+  }
 
-mkFrameFilter :: FrameDict -> [Text] -> [Text] -> FrameFilter
-mkFrameFilter frameDict matching notMatching =
-  FrameFilter $ Set.fromList
-    do
-      (ix, frameName) <- zip [0..] (FrameDict.toList frameDict)
-      guard (null matching || any (match frameName) matching)
-      guard (not $ any (match frameName) notMatching)
-      pure (FrameId ix)
+mkFrameFilter :: FrameDict -> [Text] -> [Text] -> [Text] -> FrameFilter
+mkFrameFilter frameDict matching notMatching notMatchingChildren =
+  let matchingIds = mkFrameFilterComponent matching
+      notMatchingIds = mkFrameFilterComponent notMatching
+      notMatchingChildrenIds = mkFrameFilterComponent notMatchingChildren
+  in
+    FrameFilter
+    { matchingIds
+    , notMatchingIds
+    , notMatchingChildrenIds
+    }
   where
     match frameName substr = Text.isInfixOf substr (unFrameName frameName)
+    mkFrameFilterComponent toMatch =
+      let frameNames = FrameDict.frameNames frameDict
+          matchingCondition frameName =
+              any (match frameName) toMatch
+      in
+        Map.filter matchingCondition frameNames
+        & Map.keysSet
 
-applyFrameFilter :: FrameFilter -> FrameId -> Bool
-applyFrameFilter (FrameFilter frameIds) frameId =
-  Set.member frameId frameIds
+applyFrameFilter :: FrameFilter -> [FrameId] -> FrameId -> Bool
+applyFrameFilter frameFilter stack frameId =
+  (null matchingIds || frameId `elem` matchingIds)
+  && frameId `notElem` notMatchingIds
+  && all (`notElem` notMatchingChildrenIds) stack
+  where
+    FrameFilter { matchingIds, notMatchingIds, notMatchingChildrenIds } = frameFilter
 
 data FrameEventType = Open | Close
   deriving (Eq, Ord, Show)
@@ -352,9 +380,9 @@ countUserEvents conn threadId =
       & Pipes.liftIO
     pure r
 
-data ThreadAnalysis =
+newtype ThreadAnalysis =
   ThreadAnalysis
-  { stack :: ![FrameId]
+  { stack :: [FrameId]
   }
   deriving (Show)
   deriving (Generic)
@@ -367,33 +395,53 @@ emptyThreadAnalysis =
 
 analyzeThread
   :: MonadSafe m
-  => Connection
+  => FrameFilter
+  -> Connection
   -> GHC.ThreadId
   -> Producer FrameEvent m ()
-analyzeThread conn threadId =
+analyzeThread frameFilter conn threadId =
   do
     ref <- newIORef emptyThreadAnalysis & Pipes.liftIO
     Pipes.for (produceThreadEvents conn threadId)
-      (\event -> processThreadEvent event & Pipes.hoist (refStateT ref))
+      (\event -> processThreadEvent frameFilter event & Pipes.hoist (refStateT ref))
     pure ()
 
 processThreadEvent
   :: MonadState ThreadAnalysis m
-  => ThreadEvent
+  => FrameFilter
+  -> ThreadEvent
   -> Producer FrameEvent m ()
-processThreadEvent ThreadEvent { frameEvent } = threadFrame frameEvent
+processThreadEvent frameFilter ThreadEvent { frameEvent } =
+    threadFrame frameFilter frameEvent
 
 threadFrame
   :: MonadState ThreadAnalysis m
-  => FrameEvent
+  => FrameFilter
+  -> FrameEvent
   -> Producer FrameEvent m ()
-threadFrame frameEvent@FrameEvent { eventType, eventFrameId } =
-  do
-    case eventType of { Open -> pushThread; Close -> popThread } eventFrameId
-    Pipes.yield frameEvent
+threadFrame frameFilter frameEvent@FrameEvent { eventType, eventFrameId } =
+  case eventType of
+    Open -> threadFrameWorker pushThreadAndExtractTail 
+    Close -> threadFrameWorker popThreadAndExtract 
+  where
+    threadFrameWorker action = do
+      stack <- action eventFrameId
+      when (applyFrameFilter frameFilter stack eventFrameId) $
+        Pipes.yield frameEvent
 
 pushThread :: MonadState ThreadAnalysis m => FrameId -> m ()
 pushThread frameId = field @"stack" %= (:) frameId
+
+pushThreadAndExtractTail
+  :: MonadState ThreadAnalysis m
+  => FrameId
+  -> m [FrameId]
+pushThreadAndExtractTail frameId = do
+  -- inspect stack before pushing to extract tail of
+  -- current stack
+  ThreadAnalysis { stack } <- State.get
+  pushThread frameId
+  return stack
 
 popThread :: HasCallStack => MonadState ThreadAnalysis m => FrameId -> m ()
 popThread frameId =
@@ -415,6 +463,15 @@ popThread frameId =
           , "but found"
           , show frameId'
           ]
+
+popThreadAndExtract
+  :: MonadState ThreadAnalysis m
+  => FrameId
+  -> m [FrameId]
+popThreadAndExtract frameId = do
+  popThread frameId
+  ThreadAnalysis { stack } <- State.get
+  return stack
 
 array :: (ToJSON a, MonadIO m) => Producer a m r -> Producer ByteString m r
 array producer =
@@ -506,8 +563,7 @@ produceProfile conn frames frameFilter endTime =
             comma
             Pipes.yield "\"events\":"
             array
-              (analyzeThread conn thread
-                >-> Pipes.filter (applyFrameFilter frameFilter . eventFrameId)
+              (analyzeThread frameFilter conn thread
                 >-> Pipes.map Aeson.toJSON
               )
             Pipes.yield "}"

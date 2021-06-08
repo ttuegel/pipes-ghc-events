@@ -1,7 +1,7 @@
 module Speedscope.FrameDict
   ( FrameName (..)
   , FrameId (..)
-  , FrameDict
+  , FrameDict (frameNames)
   , empty
   , insert
   , lookup
