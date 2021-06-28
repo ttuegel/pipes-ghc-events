@@ -4,6 +4,7 @@ module Speedscope.Main
   , parseOptions
   ) where
 
+import Control.Monad.Reader (MonadReader)
 import Control.Monad.State.Strict (MonadState)
 import Control.Monad.State.Strict (StateT)
 import Data.Aeson (ToJSON)
@@ -32,6 +33,7 @@ import Control.Lens ((.=))
 import Control.Lens ((%=))
 import Control.Lens (at)
 import Control.Monad (when)
+import Control.Monad.Reader (runReaderT)
 import Control.Monad.State.Strict (runStateT)
 import Data.Function ((&))
 import Data.Generics.Product (field)
@@ -43,6 +45,7 @@ import Pipes.GHC.RTS.Events (decodeEventLog)
 
 import qualified Control.Lens as Lens
 import qualified Control.Monad as Monad
+import qualified Control.Monad.Reader as Reader
 import qualified Control.Monad.State.Strict as State
 import qualified Data.Aeson as Aeson
 import qualified Data.ByteString.Char8 as ByteString.Char8
@@ -395,6 +398,7 @@ emptyThreadAnalysis =
 
 analyzeThread
   :: MonadSafe m
+  => MonadReader FrameDict m
   => FrameFilter
   -> Connection
   -> GHC.ThreadId
@@ -408,6 +412,7 @@ analyzeThread frameFilter conn threadId =
 
 processThreadEvent
   :: MonadState ThreadAnalysis m
+  => MonadReader FrameDict m
   => FrameFilter
   -> ThreadEvent
   -> Producer FrameEvent m ()
@@ -416,6 +421,7 @@ processThreadEvent frameFilter ThreadEvent { frameEvent } =
 
 threadFrame
   :: MonadState ThreadAnalysis m
+  => MonadReader FrameDict m
   => FrameFilter
   -> FrameEvent
   -> Producer FrameEvent m ()
@@ -443,29 +449,41 @@ pushThreadAndExtractTail frameId = do
   pushThread frameId
   return stack
 
-popThread :: HasCallStack => MonadState ThreadAnalysis m => FrameId -> m ()
+popThread
+  :: HasCallStack
+  => MonadState ThreadAnalysis m
+  => MonadReader FrameDict m
+  => FrameId
+  -> m ()
 popThread frameId =
   do
     ThreadAnalysis { stack } <- State.get
     case stack of
-      [] ->
+      [] -> do
+        mFrameName <- Reader.asks $ FrameDict.lookup frameId
+        let frameName = maybe (show frameId) show mFrameName
         (error . unwords)
-        [ "expected"
-        , show frameId
-        , "but found nothing"
-        ]
+          [ "expected"
+          , frameName
+          , "but found nothing"
+          ]
       (frameId' : stack')
         | frameId' == frameId -> field @"stack" .= stack'
-        | otherwise ->
+        | otherwise -> do
+          mFrameName <- Reader.asks $ FrameDict.lookup frameId
+          mFrameName' <- Reader.asks $ FrameDict.lookup frameId'
+          let frameName = maybe (show frameId) show mFrameName
+              frameName' = maybe (show frameId') show mFrameName'
           (error.unwords)
-          [ "expected"
-          , show frameId
-          , "but found"
-          , show frameId'
-          ]
+            [ "expected"
+            , frameName
+            , "but found"
+            , frameName'
+            ]
 
 popThreadAndExtract
   :: MonadState ThreadAnalysis m
+  => MonadReader FrameDict m
   => FrameId
   -> m [FrameId]
 popThreadAndExtract frameId = do
@@ -563,7 +581,8 @@ produceProfile conn frames frameFilter endTime =
             comma
             Pipes.yield "\"events\":"
             array
-              (analyzeThread frameFilter conn thread
+              (Pipes.hoist (flip runReaderT frames)
+                (analyzeThread frameFilter conn thread)
                 >-> Pipes.map Aeson.toJSON
               )
             Pipes.yield "}"
