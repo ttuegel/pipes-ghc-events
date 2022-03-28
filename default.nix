@@ -3,9 +3,7 @@
 let
   sources = import ./nix/sources.nix;
   haskell-nix = import sources."haskell.nix" {};
-  pkgs =
-    let args = haskell-nix.nixpkgsArgs; in
-    import haskell-nix.sources.nixpkgs-2009 args;
+  pkgs = import haskell-nix.sources.nixpkgs-unstable haskell-nix.nixpkgsArgs;
 
   project =
     pkgs.haskell-nix.cabalProject {
@@ -18,8 +16,8 @@ let
       inherit pkgs project;
 
       # Change the compiler when updating our own resolver.
-      compiler-nix-name = "ghc8104";
-      index-state = "2021-02-09T00:00:00Z";
+      compiler-nix-name = "ghc8107";
+      index-state = "2022-03-27T00:00:00Z";
     };
 
 in default
