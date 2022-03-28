@@ -2,3 +2,4 @@ packages:
   eventlog2speedscope
   pipes-ghc-events
   pipes-sqlite-simple
+  pipes-aeson

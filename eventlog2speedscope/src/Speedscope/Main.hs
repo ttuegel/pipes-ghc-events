@@ -128,7 +128,7 @@ parseOptions =
 withEventLog :: FilePath -> (Producer GHC.Event IO () -> IO a) -> IO a
 withEventLog filename act =
   System.withFile filename System.ReadMode
-  (act . decodeEventLog . Pipes.ByteString.fromHandle)
+  (act . decodeEventLog . \h -> Pipes.ByteString.fromHandle h)
 
 withDatabase :: (SQLite.Connection -> IO a) -> IO a
 withDatabase = SQLite.withConnection ":memory:"

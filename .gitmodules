@@ -1,3 +1,6 @@
 [submodule "pipes-sqlite-simple"]
 	path = pipes-sqlite-simple
 	url = https://github.com/ttuegel/pipes-sqlite-simple.git
+[submodule "pipes-aeson"]
+	path = pipes-aeson
+	url = https://github.com/ttuegel/pipes-aeson.git
