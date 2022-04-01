@@ -16,7 +16,7 @@ let
       inherit pkgs project;
 
       # Change the compiler when updating our own resolver.
-      compiler-nix-name = "ghc922";
+      compiler-nix-name = "ghc902";
       index-state = "2022-03-27T00:00:00Z";
     };
 
